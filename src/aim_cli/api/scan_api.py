@@ -14,14 +14,24 @@ def trigger(
     domain: str | None = None,
     profile: str = "standard",
     api_key: str | None = None,
+    auth_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """POST /api/v1/scans/trigger — start a new scan."""
+    """POST /api/v1/scans/trigger — start a new scan.
+
+    ``auth_params`` carries V2.0 auth strategy fields (auth_type,
+    bearer_token, oauth_client_id, etc.).  Only non-None entries are
+    merged into the request body.
+    """
     body: dict[str, Any] = {}
     if site_id is not None:
         body["site_id"] = site_id
     if domain:
         body["domain"] = domain
     body["scan_profile"] = profile
+
+    # Merge V2.0 auth fields into the request body
+    if auth_params:
+        body.update(auth_params)
 
     resp = request("POST", endpoints.SCANS_TRIGGER, json=body, api_key=api_key)
     return resp.json()  # type: ignore[no-any-return]

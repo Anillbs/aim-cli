@@ -35,6 +35,51 @@ def start(
     format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: json, sarif, csv."),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Write output to file."),
     api_key: Optional[str] = typer.Option(None, "--api-key", envvar="AIM_API_KEY", hidden=True),
+    # ── V2.0: Authentication parameters ──────────────────────────────────
+    auth_type: Optional[str] = typer.Option(
+        None, "--auth-type",
+        help="Auth strategy: form_login, bearer, api_key, cookie, oauth2.",
+    ),
+    login_url: Optional[str] = typer.Option(
+        None, "--login-url", help="Login page URL for form-based auth.",
+    ),
+    login_username: Optional[str] = typer.Option(
+        None, "--login-username", envvar="AIM_LOGIN_USERNAME",
+        help="Login username. Prefer AIM_LOGIN_USERNAME env var.",
+    ),
+    login_password: Optional[str] = typer.Option(
+        None, "--login-password", envvar="AIM_LOGIN_PASSWORD",
+        help="Login password. Prefer AIM_LOGIN_PASSWORD env var.",
+    ),
+    totp_secret: Optional[str] = typer.Option(
+        None, "--totp-secret", envvar="AIM_TOTP_SECRET",
+        help="TOTP/2FA secret key. Prefer AIM_TOTP_SECRET env var.",
+    ),
+    bearer_token: Optional[str] = typer.Option(
+        None, "--bearer-token", envvar="AIM_BEARER_TOKEN",
+        help="Static Bearer token. Prefer AIM_BEARER_TOKEN env var.",
+    ),
+    api_key_header: Optional[str] = typer.Option(
+        None, "--api-key-header",
+        help="Custom header name for API key auth (default: X-API-Key).",
+    ),
+    api_key_value: Optional[str] = typer.Option(
+        None, "--api-key-value", envvar="AIM_API_KEY_VALUE",
+        help="API key value. Prefer AIM_API_KEY_VALUE env var.",
+    ),
+    cookie_file: Optional[Path] = typer.Option(
+        None, "--cookie-file",
+        help="Path to cookie file (Netscape or JSON format).",
+        exists=True, readable=True,
+    ),
+    oauth_client_id: Optional[str] = typer.Option(
+        None, "--oauth-client-id", envvar="AIM_OAUTH_CLIENT_ID",
+        help="OAuth 2.0 client ID. Prefer AIM_OAUTH_CLIENT_ID env var.",
+    ),
+    oauth_client_secret: Optional[str] = typer.Option(
+        None, "--oauth-client-secret", envvar="AIM_OAUTH_CLIENT_SECRET",
+        help="OAuth 2.0 client secret. Prefer AIM_OAUTH_CLIENT_SECRET env var.",
+    ),
 ) -> None:
     """Start a new security scan."""
     # Determine if target is a site_id or domain
@@ -45,11 +90,30 @@ def start(
     except ValueError:
         domain = target
 
+    # ── Build auth payload ────────────────────────────────────────────────
+    auth_payload = _build_auth_payload(
+        auth_type=auth_type,
+        login_url=login_url,
+        login_username=login_username,
+        login_password=login_password,
+        totp_secret=totp_secret,
+        bearer_token=bearer_token,
+        api_key_header=api_key_header,
+        api_key_value=api_key_value,
+        cookie_file=cookie_file,
+        oauth_client_id=oauth_client_id,
+        oauth_client_secret=oauth_client_secret,
+    )
+
     # Trigger the scan
     with spinner("Starting scan..."):
         try:
             result = scan_api.trigger(
-                site_id=site_id, domain=domain, profile=profile, api_key=api_key
+                site_id=site_id,
+                domain=domain,
+                profile=profile,
+                api_key=api_key,
+                auth_params=auth_payload,
             )
         except AIMCLIError as e:
             error(str(e), hint=e.hint, request_id=e.request_id)
@@ -166,6 +230,53 @@ def _check_quality_gate(summary: dict, fail_on: str) -> None:
 
     if failing:
         raise QualityGateError(failing)
+
+
+def _build_auth_payload(
+    *,
+    auth_type: str | None,
+    login_url: str | None,
+    login_username: str | None,
+    login_password: str | None,
+    totp_secret: str | None,
+    bearer_token: str | None,
+    api_key_header: str | None,
+    api_key_value: str | None,
+    cookie_file: Path | None,
+    oauth_client_id: str | None,
+    oauth_client_secret: str | None,
+) -> dict[str, str | None]:
+    """Collect auth CLI flags into a JSON-safe dict.
+
+    Only non-None values are included so the API receives a minimal payload.
+    Cookie file contents are read and embedded inline.
+    """
+    payload: dict[str, str | None] = {}
+
+    if auth_type:
+        payload["auth_type"] = auth_type
+    if login_url:
+        payload["login_url"] = login_url
+    if login_username:
+        payload["login_username"] = login_username
+    if login_password:
+        payload["login_password"] = login_password
+    if totp_secret:
+        payload["totp_secret"] = totp_secret
+    if bearer_token:
+        payload["bearer_token"] = bearer_token
+    if api_key_header:
+        payload["api_key_header"] = api_key_header
+    if api_key_value:
+        payload["api_key_value"] = api_key_value
+    if cookie_file:
+        payload["cookie_data"] = cookie_file.read_text(encoding="utf-8")
+    if oauth_client_id:
+        payload["oauth_client_id"] = oauth_client_id
+    if oauth_client_secret:
+        payload["oauth_client_secret"] = oauth_client_secret
+
+    return payload
 
 
 def _write_output(content: str, output: Path | None) -> None:
